@@ -31,7 +31,7 @@ def get_BGR_image(image):
     return image
 
 
-def get_model(model_name):
+def get_model(model_name, quant_args):
     if model_name == 'BLIP2':
         from .test_blip2 import TestBlip2
         return TestBlip2()
@@ -43,7 +43,7 @@ def get_model(model_name):
         return TestLLamaAdapterV2()
     elif model_name == 'LLaVA':
         from .test_llava import TestLLaVA
-        return TestLLaVA()
+        return TestLLaVA(quant_args)
     elif model_name == 'MiniGPT-4':
         from .test_minigpt4 import TestMiniGPT4
         return TestMiniGPT4()

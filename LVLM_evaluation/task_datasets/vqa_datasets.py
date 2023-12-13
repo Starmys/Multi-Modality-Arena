@@ -6,17 +6,20 @@ from . import DATA_DIR
 
 
 class TextVQADataset(Dataset):
-    data_root = f"{DATA_DIR}/VQA_Datasets/TextVQA"
+    data_root = f"{DATA_DIR}/TextVQA"
 
     def __init__(self):
-        self.data = json.load(open(f"{self.data_root}/TextVQA_0.5.1_val.json", "r"))["data"]
-        self.image_dir_path = self.data_root + '/train_images'
+        self.data = json.load(open(f"{self.data_root}/annotation/TextVQA_0.5.1_val.json", "r"))["data"]
+        with open('/home/chengzhang/Multimodal-Quantization/LLaVA/playground/data/eval/textvqa/llava_textvqa_val_v051_ocr.jsonl') as f:
+            self.ocr_text = [json.loads(line)['text'] for line in f.readlines() if line.startswith('{')]
+        self.image_dir_path = self.data_root + '/images-v0.5/train_images'
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        question = self.data[idx]['question']
+        # question = self.data[idx]['question']
+        question = self.ocr_text[idx]
         answers = self.data[idx]['answers']
         img_path = os.path.join(self.image_dir_path, f"{self.data[idx]['image_id']}.jpg")
         return {

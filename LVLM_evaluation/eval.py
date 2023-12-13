@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import argparse
 import datetime
 from functools import partial
@@ -20,6 +21,7 @@ def parse_args():
     parser.add_argument("--device", type=int, default=-1)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=-1)
+    parser.add_argument("--quant_args", type=str, default=None)
 
     # datasets
     parser.add_argument("--ocr_dataset_name", type=str, default="IIIT5K SVT IC13 IC15 SVTP CUTE80 COCO-Text Total-Text WordArt CTW HOST WOST")
@@ -84,7 +86,7 @@ def get_eval_function(args):
 
 def main(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.device)
-    model = get_model(args.model_name, device=torch.device('cuda'))
+    model = get_model(args.model_name, args.quant_args)
     time = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     answer_path = f"{args.answer_path}/{args.model_name}"
 
@@ -110,5 +112,8 @@ def main(args):
 
 
 if __name__ == "__main__":
+    random.seed(2023)
+    np.random.seed(2023)
+    torch.manual_seed(2023)
     args = parse_args()
     main(args)

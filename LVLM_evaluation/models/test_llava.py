@@ -1,8 +1,15 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers import CLIPImageProcessor, CLIPVisionModel, StoppingCriteria
-from .llava import LlavaMPTForCausalLM, LlavaLlamaForCausalLM, conv_templates, SeparatorStyle
 from . import get_image
+
+from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+from llava.conversation import conv_templates, SeparatorStyle
+from llava.model.builder import load_pretrained_model
+from llava.utils import disable_torch_init
+from llava.mm_utils import tokenizer_image_token, get_model_name_from_path
+
+from .quantize_linear import load_quant
 
 
 DEFAULT_IMAGE_TOKEN = "<image>"
@@ -43,75 +50,39 @@ def get_model_name(model_path):
 
 
 def get_conv(model_name):
-    if "llava" in model_name.lower():
-        if "v1" in model_name.lower():
-            template_name = "llava_v1"
-        elif "mpt" in model_name.lower():
-            template_name = "mpt_multimodal"
-        else:
-            template_name = "multimodal"
-    elif "mpt" in model_name:
-        template_name = "mpt_text"
-    elif "koala" in model_name: # Hardcode the condition
-        template_name = "bair_v1"
-    elif "v1" in model_name:    # vicuna v1_1/v1_2
-        template_name = "vicuna_v1_1"
-    else:
-        template_name = "v1"
+    # if "llava" in model_name.lower():
+    #     if "v1" in model_name.lower():
+    #         template_name = "llava_v1"
+    #     elif "mpt" in model_name.lower():
+    #         template_name = "mpt_multimodal"
+    #     else:
+    #         template_name = "multimodal"
+    # elif "mpt" in model_name:
+    #     template_name = "mpt_text"
+    # elif "koala" in model_name: # Hardcode the condition
+    #     template_name = "bair_v1"
+    # elif "v1" in model_name:    # vicuna v1_1/v1_2
+    #     template_name = "vicuna_v1_1"
+    # else:
+    #     template_name = "v1"
+    template_name = 'vicuna_v1'
     return conv_templates[template_name].copy()
 
 
-def load_model(model_path, model_name, dtype=torch.float16, device='cpu'):
-    # get tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    if 'llava' in model_name.lower():
-        if 'mpt' in model_name.lower():
-            model = LlavaMPTForCausalLM.from_pretrained(model_path, torch_dtype=dtype, low_cpu_mem_usage=True)
-        else:
-            model = LlavaLlamaForCausalLM.from_pretrained(model_path, torch_dtype=dtype, low_cpu_mem_usage=True)
-    elif 'mpt' in model_name.lower():
-        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype, low_cpu_mem_usage=True, trust_remote_code=True)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=dtype, low_cpu_mem_usage=True)
-
-    # get image processor
-    image_processor = None
-    if 'llava' in model_name.lower():
-        image_processor = CLIPImageProcessor.from_pretrained(model.config.mm_vision_tower, torch_dtype=dtype)
-
-        mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
-        tokenizer.add_tokens([DEFAULT_IMAGE_PATCH_TOKEN], special_tokens=True)
-        if mm_use_im_start_end:
-            tokenizer.add_tokens([DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN], special_tokens=True)
-
-        vision_tower = model.get_model().vision_tower[0]
-        if vision_tower.device.type == 'meta':
-            vision_tower = CLIPVisionModel.from_pretrained(vision_tower.config._name_or_path, torch_dtype=dtype, low_cpu_mem_usage=True).to(device=device)
-            model.get_model().vision_tower[0] = vision_tower
-        else:
-            vision_tower.to(device=device, dtype=dtype)
-        
-        vision_config = vision_tower.config
-        vision_config.im_patch_token = tokenizer.convert_tokens_to_ids([DEFAULT_IMAGE_PATCH_TOKEN])[0]
-        vision_config.use_im_start_end = mm_use_im_start_end
-        if mm_use_im_start_end:
-            vision_config.im_start_token, vision_config.im_end_token = tokenizer.convert_tokens_to_ids([DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN])
-
-    if hasattr(model.config, "max_sequence_length"):
-        context_len = model.config.max_sequence_length
-    else:
-        context_len = 2048
-
-    model.to(device=device)
-
+def load_model(model_path, model_name, quant_args, dtype=torch.float16, device='cpu'):
+    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, None, model_name)
+    if quant_args is not None:
+        quant_args = {k: v for k, v in [x.split('=') for x in quant_args.replace('"', '').split(',')]}
+        print(f'[Quant Args] {quant_args}')
+        model = load_quant(model, **quant_args)
     return tokenizer, model, image_processor, context_len
 
 
 class TestLLaVA:
-    def __init__(self):
-        model_path="liuhaotian/LLaVA-Lightning-MPT-7B-preview"
+    def __init__(self, quant_args):
+        model_path="/home/chengzhang/models/llava/llava-v1.5-7b"
         model_name = get_model_name(model_path)
-        self.tokenizer, self.model, self.image_processor, self.context_len = load_model(model_path, model_name)
+        self.tokenizer, self.model, self.image_processor, self.context_len = load_model(model_path, model_name, quant_args)
         self.conv = get_conv(model_name)
         self.image_process_mode = "Resize" # Crop, Resize, Pad
 
@@ -124,7 +95,7 @@ class TestLLaVA:
         else:
             self.dtype = torch.float32
             self.device = 'cpu'
-        vision_tower = self.model.get_model().vision_tower[0]
+        vision_tower = self.model.get_model().vision_tower
         vision_tower.to(device=self.device, dtype=self.dtype)
         self.model.to(device=self.device, dtype=self.dtype)
     
@@ -132,13 +103,43 @@ class TestLLaVA:
     def generate(self, image, question, max_new_tokens=128):
         image = get_image(image)
         conv = self.conv.copy()
-        text = question + '\n<image>'
-        text = (text, image, self.image_process_mode)
+        text = question# + '\nAnswer the question using a single word or phrase.'
+        # text = (text, image, self.image_process_mode)
+        if self.model.config.mm_use_im_start_end:
+            text = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + text
+        else:
+            text = DEFAULT_IMAGE_TOKEN + '\n' + text
         conv.append_message(conv.roles[0], text)
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
-        stop_str = conv.sep if conv.sep_style in [SeparatorStyle.SINGLE, SeparatorStyle.MPT] else conv.sep2
-        output = self.do_generate([prompt], [image], stop_str=stop_str, dtype=self.dtype, max_new_tokens=max_new_tokens)[0]
+        image = self.image_processor.preprocess(image.convert("RGB"), return_tensors='pt')['pixel_values']
+        image = image.half().to(self.model.device).unsqueeze(0)
+        input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX)
+        max_len = len(input_ids)
+        input_ids = [
+            [self.tokenizer.pad_token_id] * (max_len - len(seq)) + seq
+            for seq in input_ids
+        ]
+        input_ids = torch.tensor(input_ids, dtype=torch.long, device=self.model.device)
+        
+        stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+        keywords = [stop_str]
+        stopping_criteria = KeywordsStoppingCriteria(keywords, self.tokenizer, input_ids)
+
+        with torch.inference_mode():
+            output_ids = self.model.generate(
+                input_ids,
+                images=image,
+                do_sample=True,
+                temperature=0.2,
+                top_p=None,
+                num_beams=1,
+                max_new_tokens=128,
+                use_cache=True,
+                stopping_criteria=[stopping_criteria],
+            )
+
+        output = self.tokenizer.batch_decode(output_ids[:, max_len:], skip_special_tokens=True)
 
         return output
     
@@ -148,18 +149,63 @@ class TestLLaVA:
         for image, question in zip(image_list, question_list):
             image = get_image(image)
             conv = self.conv.copy()
-            text = question + '\n<image>'
-            text = (text, image, self.image_process_mode)
+            text = question# + '\nAnswer the question using a single word or phrase.'
+            # text = (text, image, self.image_process_mode)
+            if self.model.config.mm_use_im_start_end:
+                text = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + text
+            else:
+                text = DEFAULT_IMAGE_TOKEN + '\n' + text
             conv.append_message(conv.roles[0], text)
             conv.append_message(conv.roles[1], None)
             prompt = conv.get_prompt()
             prompts.append(prompt)
             images.append(image)
-        stop_str = conv.sep if conv.sep_style in [SeparatorStyle.SINGLE, SeparatorStyle.MPT] else conv.sep2
-        outputs = self.do_generate(prompts, images, stop_str=stop_str, dtype=self.dtype, max_new_tokens=max_new_tokens)
+        # stop_str = conv.sep if conv.sep_style in [SeparatorStyle.SINGLE, SeparatorStyle.MPT] else conv.sep2
+        # outputs = self.do_generate(prompts, images, stop_str=stop_str, dtype=self.dtype, max_new_tokens=max_new_tokens)
 
+        images = torch.stack([
+            self.image_processor.preprocess(example.convert("RGB"), return_tensors='pt')['pixel_values'].half()
+            for example in images
+        ]).to(self.model.device)
+        input_ids = [
+            tokenizer_image_token(text, self.tokenizer, IMAGE_TOKEN_INDEX)
+            for text in prompts
+        ]
+
+        [1, 2, 3, 4, -200, 5, 6, 7, 8]
+        img_token_start = input_ids[0].index(IMAGE_TOKEN_INDEX)  # 4
+        img_token_end = len(input_ids[0]) - input_ids[0].index(IMAGE_TOKEN_INDEX)  # 4
+        text = concat([act[:img_token_start], act[-img_token_end:]])
+        vision = ...
+        [1, 2, 3, 4, (0.3, 0.4, 0.5, ... , 0.8), 5, 6, 7, 8]
+
+        max_len = max(len(seq) for seq in input_ids)
+        input_ids = [
+            [self.tokenizer.pad_token_id] * (max_len - len(seq)) + seq
+            for seq in input_ids
+        ]
+        input_ids = torch.tensor(input_ids, dtype=torch.long, device=self.model.device)
+        
+        stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+        keywords = [stop_str]
+        stopping_criteria = KeywordsStoppingCriteria(keywords, self.tokenizer, input_ids)
+
+        with torch.inference_mode():
+            output_ids = self.model.generate(
+                input_ids,
+                images=images,
+                do_sample=True,
+                temperature=0.2,
+                top_p=None,
+                num_beams=1,
+                max_new_tokens=128,
+                use_cache=True,
+                stopping_criteria=[stopping_criteria],
+            )
+
+        outputs = self.tokenizer.batch_decode(output_ids[:, max_len:], skip_special_tokens=True)
         return outputs
-    
+
     def get_images_input_ids(self, images, prompts, dtype=torch.float16, keep_aspect_ratio=False):
         if keep_aspect_ratio:
             new_images = []
