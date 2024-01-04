@@ -1,0 +1,5 @@
+{
+    "quant_checkpoint": "/home/chengzhang/Multimodal-Quantization/GPTQ-for-LLaMa/models/llava-1.5-7b-textv-4bit.pt",
+    "w_bits": "4",
+    "a_bits": "32"
+}

@@ -1,0 +1,6 @@
+{
+    "w_bits": "32",
+    "a_bits": "4",
+    "act_quant_func": "lut",
+    "act_token_split": "1"
+}

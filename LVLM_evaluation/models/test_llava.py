@@ -172,13 +172,6 @@ class TestLLaVA:
             for text in prompts
         ]
 
-        [1, 2, 3, 4, -200, 5, 6, 7, 8]
-        img_token_start = input_ids[0].index(IMAGE_TOKEN_INDEX)  # 4
-        img_token_end = len(input_ids[0]) - input_ids[0].index(IMAGE_TOKEN_INDEX)  # 4
-        text = concat([act[:img_token_start], act[-img_token_end:]])
-        vision = ...
-        [1, 2, 3, 4, (0.3, 0.4, 0.5, ... , 0.8), 5, 6, 7, 8]
-
         max_len = max(len(seq) for seq in input_ids)
         input_ids = [
             [self.tokenizer.pad_token_id] * (max_len - len(seq)) + seq

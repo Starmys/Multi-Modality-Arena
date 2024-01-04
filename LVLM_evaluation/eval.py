@@ -109,6 +109,11 @@ def main(args):
     result_path = os.path.join(os.path.join(answer_path, time), 'result.json')
     with open(result_path, "w") as f:
         f.write(json.dumps(result, indent=4))
+    if args.quant_args:
+        args_path = os.path.join(os.path.join(answer_path, time), 'args.json')
+        quant_args = {k: v for k, v in [x.split('=') for x in args.quant_args.replace('"', '').split(',')]}
+        with open(args_path, "w") as f:
+            f.write(json.dumps(quant_args, indent=4))
 
 
 if __name__ == "__main__":
